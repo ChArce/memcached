@@ -584,6 +584,7 @@ conn *conn_new(const int sfd, enum conn_states init_state,
 
     c->noreply = false;
 
+	//为接受的套接字在libevent中注册一个事件，处理函数是event_handler
     event_set(&c->event, sfd, event_flags, event_handler, (void *)c);
     event_base_set(base, &c->event);
     c->ev_flags = event_flags;
@@ -4609,6 +4610,7 @@ static void drive_machine(conn *c) {
                 stats.rejected_conns++;
                 STATS_UNLOCK();
             } else {
+				//主线程会监听socket上的连接，如果有clinet发送连接请求，那么就会通过如下接口往工作线程的工作队列中添加任务
                 dispatch_conn_new(sfd, conn_new_cmd, EV_READ | EV_PERSIST,
                                      DATA_BUFFER_SIZE, c->transport);
             }
@@ -4629,6 +4631,7 @@ static void drive_machine(conn *c) {
             break;
 
         case conn_read:
+			//真正的数据请求来了，如果是UDP则try_read_udp；否则try_read_network
             res = IS_UDP(c->transport) ? try_read_udp(c) : try_read_network(c);
 
             switch (res) {
@@ -5217,11 +5220,15 @@ static int server_socket_unix(const char *path, int access_mask) {
     /*
      * Clean up a previous socket file if we left it around
      */
+	//lstat查看文件状态的 属性写入stat结构
     if (lstat(path, &tstat) == 0) {
+		//check文件是否为socket
         if (S_ISSOCK(tstat.st_mode))
+			//删除文件
             unlink(path);
     }
 
+	//设置套接字的选项
     setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (void *)&flags, sizeof(flags));
     setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flags, sizeof(flags));
     setsockopt(sfd, SOL_SOCKET, SO_LINGER, (void *)&ling, sizeof(ling));
@@ -5236,6 +5243,7 @@ static int server_socket_unix(const char *path, int access_mask) {
     strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
     assert(strcmp(addr.sun_path, path) == 0);
     old_umask = umask( ~(access_mask&0777));
+	//绑定套接字和本地地址
     if (bind(sfd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
         perror("bind()");
         close(sfd);
@@ -5243,6 +5251,8 @@ static int server_socket_unix(const char *path, int access_mask) {
         return 1;
     }
     umask(old_umask);
+	//listen 设置socket为listen模式，backlog指定同时能够处理的最大连接要求，真正接受连接的是accpet()
+	// socket() -> bind() -> listne() -> accept()
     if (listen(sfd, settings.backlog) == -1) {
         perror("listen()");
         close(sfd);
@@ -6341,6 +6351,8 @@ int main (int argc, char **argv) {
     stats_init();
     assoc_init(settings.hashpower_init);
     conn_init();
+	
+	//初始化slab的类型  确定chunk的大小
     slabs_init(settings.maxbytes, settings.factor, preallocate,
             use_slab_sizes ? slab_sizes : NULL);
 
@@ -6353,8 +6365,10 @@ int main (int argc, char **argv) {
         exit(EX_OSERR);
     }
     /* start up worker threads if MT mode */
+	//初始化工作线程
     memcached_thread_init(settings.num_threads);
 
+	//启动哈希表的维护线程，负责哈希表的内容
     if (start_assoc_maintenance_thread() == -1) {
         exit(EXIT_FAILURE);
     }
@@ -6369,16 +6383,19 @@ int main (int argc, char **argv) {
         return 1;
     }
 
+	//内存模块的管理线程，主要考虑数据存储的value比较极端的情况，例如可能在某一种chunk分配之后很久没有被访问到，而其他经常被访问的则申请存储不成功，根据LRU算法可以考虑将最近最少访问的内存块重新划分。
     if (settings.slab_reassign &&
         start_slab_maintenance_thread() == -1) {
         exit(EXIT_FAILURE);
     }
 
+	//启动一个线程专门负责idle connection，如果检查到timeout的那么就会给thread的notify_send_fd发送消息，触发thread_libevent_process来close相应的connection
     if (settings.idle_timeout && start_conn_timeout_thread() == -1) {
         exit(EXIT_FAILURE);
     }
 
     /* initialise clock event */
+	//防止调用time()获取时间代价较高，每隔1s libevent就会触发clock_handler 然后更新时间放到current_time里面
     clock_handler(0, 0, 0);
 
     /* create unix mode sockets after dropping privileges */
@@ -6454,6 +6471,7 @@ int main (int argc, char **argv) {
     }
 
     /* Drop privileges no longer needed */
+	//降权，防止进程执行一些类似root权限才可以执行的操作
     drop_privileges();
 
     /* Initialize the uriencode lookup table. */
@@ -6464,6 +6482,7 @@ int main (int argc, char **argv) {
         retval = EXIT_FAILURE;
     }
 
+	//结束负责hash表管理的线程
     stop_assoc_maintenance_thread();
 
     /* remove the PID file if we're a daemon */
