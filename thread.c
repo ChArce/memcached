@@ -325,6 +325,7 @@ void accept_new_conns(const bool do_accept) {
  * Set up a thread's information.
  */
 static void setup_thread(LIBEVENT_THREAD *me) {
+	//libevent event_init return a event_base
     me->base = event_init();
     if (! me->base) {
         fprintf(stderr, "Can't allocate event base\n");
@@ -332,6 +333,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
     }
 
     /* Listen for notifications from other threads */
+	//如果在notify_receive_fd上出现event 那么就会指定thread_libevent_process进行处理
     event_set(&me->notify_event, me->notify_receive_fd,
               EV_READ | EV_PERSIST, thread_libevent_process, me);
     event_base_set(me->base, &me->notify_event);
@@ -353,6 +355,7 @@ static void setup_thread(LIBEVENT_THREAD *me) {
         exit(EXIT_FAILURE);
     }
 
+	//suffix_cache是做什么用的？？？？？
     me->suffix_cache = cache_create("suffix", SUFFIX_SIZE, sizeof(char*),
                                     NULL, NULL);
     if (me->suffix_cache == NULL) {
@@ -403,6 +406,7 @@ static void thread_libevent_process(int fd, short which, void *arg) {
         item = cq_pop(me->new_conn_queue);
 
         if (NULL != item) {
+			//创建struct conn结构体，状态为conn_new_cmd
             conn *c = conn_new(item->sfd, item->init_state, item->event_flags,
                                item->read_buffer_size, item->transport,
                                me->base);
@@ -455,8 +459,10 @@ static int last_thread = -1;
  * from the main thread, either during initialization (for UDP) or because
  * of an incoming connection.
  */
+//dispatch 一个conn到线程中
 void dispatch_conn_new(int sfd, enum conn_states init_state, int event_flags,
                        int read_buffer_size, enum network_transport transport) {
+	//获得一个CQ_ITEM结构，cqi_freelist如果没有的话会预先申请64个的空间
     CQ_ITEM *item = cqi_new();
     char buf[1];
     if (item == NULL) {
@@ -466,6 +472,7 @@ void dispatch_conn_new(int sfd, enum conn_states init_state, int event_flags,
         return ;
     }
 
+	//轮询的方式来分配任务给所有的worker线程
     int tid = (last_thread + 1) % settings.num_threads;
 
     LIBEVENT_THREAD *thread = threads + tid;
@@ -478,10 +485,14 @@ void dispatch_conn_new(int sfd, enum conn_states init_state, int event_flags,
     item->read_buffer_size = read_buffer_size;
     item->transport = transport;
 
+	//把这个item插入到选中的worker线程的工作队列中去
     cq_push(thread->new_conn_queue, item);
 
     MEMCACHED_CONN_DISPATCH(sfd, thread->thread_id);
+	//通过往pipe写一个字节来告诉线程客户端有请求来了，触发线程处理事件
     buf[0] = 'c';
+
+	fprintf("jiajie------ Write to pipe to notify a thread....");
     if (write(thread->notify_send_fd, buf, 1) != 1) {
         perror("Writing to thread notify pipe");
     }
@@ -546,6 +557,10 @@ item *item_alloc(char *key, size_t nkey, int flags, rel_time_t exptime, int nbyt
 item *item_get(const char *key, const size_t nkey, conn *c) {
     item *it;
     uint32_t hv;
+	/* Murmurhash或者jenkinsHash
+	 * 前者对于规律性较强的key 随机分布特征更好
+	 * 后者是目前看到的最好的hash算法，可以产生很好的分布，缺点是更加耗时
+	 */
     hv = hash(key, nkey);
     item_lock(hv);
     it = do_item_get(key, nkey, hv, c);
@@ -723,7 +738,9 @@ void memcached_thread_init(int nthreads) {
     int         i;
     int         power;
 
+	fprintf("memcached_thread_init.....");
     for (i = 0; i < POWER_LARGEST; i++) {
+		//初始化互斥锁
         pthread_mutex_init(&lru_locks[i], NULL);
     }
     pthread_mutex_init(&worker_hang_lock, NULL);
@@ -785,6 +802,7 @@ void memcached_thread_init(int nthreads) {
         threads[i].notify_receive_fd = fds[0];
         threads[i].notify_send_fd = fds[1];
 
+		//initialize the every LIBEVENT_THREAD struct.
         setup_thread(&threads[i]);
         /* Reserve three fds for the libevent base, and two for the pipe */
         stats_state.reserved_fds += 5;

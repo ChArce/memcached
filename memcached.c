@@ -2727,6 +2727,11 @@ typedef struct token_s {
  *      command  = tokens[ix].value;
  *   }
  */
+/*
+ * set key 0 60 2
+ * 12
+ * STORED
+ */
 static size_t tokenize_command(char *command, token_t *tokens, const size_t max_tokens) {
     char *s, *e;
     size_t ntokens = 0;
@@ -2742,6 +2747,7 @@ static size_t tokenize_command(char *command, token_t *tokens, const size_t max_
                 tokens[ntokens].value = s;
                 tokens[ntokens].length = e - s;
                 ntokens++;
+				//将空格替换为'\0'
                 *e = '\0';
                 if (ntokens == max_tokens - 1) {
                     e++;
@@ -3193,6 +3199,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
     do {
         while(key_token->length != 0) {
 
+			// 得到key 和key的长度
             key = key_token->value;
             nkey = key_token->length;
 
@@ -3204,6 +3211,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                 return;
             }
 
+			//获得key对应的item
             it = item_get(key, nkey, c);
             if (settings.detail_enabled) {
                 stats_prefix_record_get(key, nkey, NULL != it);
@@ -3823,6 +3831,10 @@ static void process_memlimit_command(conn *c, token_t *tokens, const size_t ntok
     }
 }
 
+//专门处理接收到的命令的函数
+//memcached command命令的格式：
+//<command name> <key> <flags> <exptime> <bytes> [noreply] \r\n
+// cas <key> <flags> <exptime> <bytes> <cas unique> [noreply] \r\n
 static void process_command(conn *c, char *command) {
 
     token_t tokens[MAX_TOKENS];
@@ -3853,7 +3865,7 @@ static void process_command(conn *c, char *command) {
     if (ntokens >= 3 &&
         ((strcmp(tokens[COMMAND_TOKEN].value, "get") == 0) ||
          (strcmp(tokens[COMMAND_TOKEN].value, "bget") == 0))) {
-
+		//处理get/bget命令
         process_get_command(c, tokens, ntokens, false);
 
     } else if ((ntokens == 6 || ntokens == 7) &&
@@ -3863,6 +3875,7 @@ static void process_command(conn *c, char *command) {
                 (strcmp(tokens[COMMAND_TOKEN].value, "prepend") == 0 && (comm = NREAD_PREPEND)) ||
                 (strcmp(tokens[COMMAND_TOKEN].value, "append") == 0 && (comm = NREAD_APPEND)) )) {
 
+		//处理诸如add set等会更新hash表中内容的命令
         process_update_command(c, tokens, ntokens, comm, false);
 
     } else if ((ntokens == 7 || ntokens == 8) && (strcmp(tokens[COMMAND_TOKEN].value, "cas") == 0 && (comm = NREAD_CAS))) {
@@ -4115,6 +4128,7 @@ static void process_command(conn *c, char *command) {
 /*
  * if we have a complete line in the buffer, process it.
  */
+//解析命令？？？
 static int try_read_command(conn *c) {
     assert(c != NULL);
     assert(c->rcurr <= (c->rbuf + c->rsize));
@@ -4227,20 +4241,26 @@ static int try_read_command(conn *c) {
 
             return 0;
         }
+		//Client端是以'\r\n'结束的
         cont = el + 1;
         if ((el - c->rcurr) > 1 && *(el - 1) == '\r') {
             el--;
         }
         *el = '\0';
 
+		//cont是指向'\n'后面的一个位置的，这里就是保证conn buffer中的数据是不小于cond指向的位置的。
         assert(cont <= (c->rcurr + c->rbytes));
 
+		//更新时间
         c->last_cmd_time = current_time;
+		//真正解析memcached command 命令的地方
         process_command(c, c->rcurr);
 
         c->rbytes -= (cont - c->rcurr);
         c->rcurr = cont;
 
+		//保证rcurr指针指向的还是buffer缓存内的位置，没有越界。
+		//我觉得因为rcurr是从cont赋值过来的，而cont是之前通过el+1获得的，而el是通过memchr查找'\n'字符得到的，那么el肯定是在c->rcurr ~ c->rcurr+c->rbytes 之前的。因为cont最多是到c->rcurr+c->rsize+1的位置
         assert(c->rcurr <= (c->rbuf + c->rsize));
     }
 
@@ -4303,6 +4323,7 @@ static enum try_read_result try_read_network(conn *c) {
     int num_allocs = 0;
     assert(c != NULL);
 
+	//说明buffer里面还有存在的数据
     if (c->rcurr != c->rbuf) {
         if (c->rbytes != 0) /* otherwise there's nothing to copy */
             memmove(c->rbuf, c->rcurr, c->rbytes);
@@ -4332,7 +4353,9 @@ static enum try_read_result try_read_network(conn *c) {
             c->rsize *= 2;
         }
 
+		//把之前存在的数据移动到buffer的顶部，之后剩下的有效的空间
         int avail = c->rsize - c->rbytes;
+		//读取数据到buf里面，读取的字节数为res
         res = read(c->sfd, c->rbuf + c->rbytes, avail);
         if (res > 0) {
             pthread_mutex_lock(&c->thread->stats.mutex);
@@ -4632,8 +4655,13 @@ static void drive_machine(conn *c) {
 
         case conn_read:
 			//真正的数据请求来了，如果是UDP则try_read_udp；否则try_read_network
+			//读取到的数据都是放在conn结构的rbuf里面
             res = IS_UDP(c->transport) ? try_read_udp(c) : try_read_network(c);
 
+			//conn_read can transited to:
+			//NO_DATA -> conn_waiting
+			//DATA_RECEIVED -> conn_parse_cmd
+			//READ_ERROR -> conn_closing
             switch (res) {
             case READ_NO_DATA_RECEIVED:
                 conn_set_state(c, conn_waiting);

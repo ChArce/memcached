@@ -97,10 +97,14 @@ unsigned int slabs_clsid(const size_t size) {
  */
 void slabs_init(const size_t limit, const double factor, const bool prealloc, const uint32_t *slab_sizes) {
     int i = POWER_SMALLEST - 1;
+	
+	// chunk_size:48 
     unsigned int size = sizeof(item) + settings.chunk_size;
 
+	//64M
     mem_limit = limit;
 
+	//request a 64M memory space one time
     if (prealloc) {
         /* Allocate everything in a big chunk with malloc */
         mem_base = malloc(mem_limit);
@@ -113,6 +117,7 @@ void slabs_init(const size_t limit, const double factor, const bool prealloc, co
         }
     }
 
+	//reset slabclass to 0
     memset(slabclass, 0, sizeof(slabclass));
 
     while (++i < MAX_NUMBER_OF_SLAB_CLASSES-1) {
@@ -127,6 +132,7 @@ void slabs_init(const size_t limit, const double factor, const bool prealloc, co
         if (size % CHUNK_ALIGN_BYTES)
             size += CHUNK_ALIGN_BYTES - (size % CHUNK_ALIGN_BYTES);
 
+		//对于每个slabclass设置size并且算出可以存储多少个item
         slabclass[i].size = size;
         slabclass[i].perslab = settings.slab_page_size / slabclass[i].size;
         if (slab_sizes == NULL)
@@ -159,6 +165,7 @@ void slabs_init(const size_t limit, const double factor, const bool prealloc, co
     }
 }
 
+//如果系统启动时预分配内存的，那么就会为每个slabclass初始化一个slab块，并将slab划分为对应大小的chunk，但是预分配不是默认启动的，毕竟slab不一定会用到，浪费内存空间。但是如果预分配的话因为已经分配好，到时候就可以直接使用。
 static void slabs_preallocate (const unsigned int maxslabs) {
     int i;
     unsigned int prealloc = 0;
@@ -215,6 +222,7 @@ static void *get_page_from_global_pool(void) {
 }
 
 static int do_slabs_newslab(const unsigned int id) {
+	fprintf("enter do_slab_newlab");
     slabclass_t *p = &slabclass[id];
     slabclass_t *g = &slabclass[SLAB_GLOBAL_PAGE_POOL];
     int len = (settings.slab_reassign || settings.slab_chunk_size_max != settings.slab_page_size)

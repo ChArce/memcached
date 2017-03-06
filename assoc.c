@@ -75,6 +75,7 @@ void assoc_init(const int hashtable_init) {
     STATS_UNLOCK();
 }
 
+//hash值只能确定到hash表中的桶位置，这时候还是得需要key来确定链中的item
 item *assoc_find(const char *key, const size_t nkey, const uint32_t hv) {
     item *it;
     unsigned int oldbucket;

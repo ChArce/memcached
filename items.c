@@ -143,6 +143,7 @@ static size_t item_make_header(const uint8_t nkey, const unsigned int flags, con
     return sizeof(item) + nkey + *nsuffix + nbytes;
 }
 
+//执行item的存储操作，该操作会将item挂载到LRU表和slab class中
 item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
                     const rel_time_t exptime, const int nbytes) {
     int i;
@@ -198,7 +199,7 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
                     break;
             }
         } else {
-            break;
+            breaku
         }
     }
 
