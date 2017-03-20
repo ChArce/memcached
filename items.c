@@ -90,6 +90,7 @@ uint64_t get_cas_id(void) {
     return next_id;
 }
 
+//判断item是否已经失效
 int item_is_flushed(item *it) {
     rel_time_t oldest_live = settings.oldest_live;
     uint64_t cas = ITEM_get_cas(it);
@@ -199,7 +200,7 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
                     break;
             }
         } else {
-            breaku
+            break;
         }
     }
 
@@ -372,6 +373,8 @@ int do_item_link(item *it, const uint32_t hv) {
 
 void do_item_unlink(item *it, const uint32_t hv) {
     MEMCACHED_ITEM_UNLINK(ITEM_key(it), it->nkey, it->nbytes);
+	//通过ITEM_LINKED位来判断item处于hashtable和LRU队列中，在do_item_link()和
+	//do_item_unlink()进行设置,如果该item在hashtable和LRU队列中，就不能执行free_item操作。
     if ((it->it_flags & ITEM_LINKED) != 0) {
         it->it_flags &= ~ITEM_LINKED;
         STATS_LOCK();
@@ -795,6 +798,7 @@ item *do_item_get(const char *key, const size_t nkey, const uint32_t hv, conn *c
     if (it != NULL) {
         was_found = 1;
         if (item_is_flushed(it)) {
+			//如果该item失效，那么需要删除该item的
             do_item_unlink(it, hv);
             do_item_remove(it);
             it = NULL;
@@ -806,6 +810,7 @@ item *do_item_get(const char *key, const size_t nkey, const uint32_t hv, conn *c
             }
             was_found = 2;
         } else if (it->exptime != 0 && it->exptime <= current_time) {
+			//item 过期/expired
             do_item_unlink(it, hv);
             do_item_remove(it);
             it = NULL;

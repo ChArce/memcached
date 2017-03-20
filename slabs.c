@@ -132,7 +132,7 @@ void slabs_init(const size_t limit, const double factor, const bool prealloc, co
         if (size % CHUNK_ALIGN_BYTES)
             size += CHUNK_ALIGN_BYTES - (size % CHUNK_ALIGN_BYTES);
 
-		//对于每个slabclass设置size并且算出可以存储多少个item
+		//对于每个slabclass设置chunk size并且算出可以存储多少个item
         slabclass[i].size = size;
         slabclass[i].perslab = settings.slab_page_size / slabclass[i].size;
         if (slab_sizes == NULL)

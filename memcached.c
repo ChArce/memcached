@@ -3203,6 +3203,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
             key = key_token->value;
             nkey = key_token->length;
 
+			//所以KEY的长度不能超过250
             if(nkey > KEY_MAX_LENGTH) {
                 out_string(c, "CLIENT_ERROR bad command line format");
                 while (i-- > 0) {
@@ -3216,6 +3217,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
             if (settings.detail_enabled) {
                 stats_prefix_record_get(key, nkey, NULL != it);
             }
+			//如果item是有效的即it!=NULL
             if (it) {
                 if (i >= c->isize) {
                     item **new_list = realloc(c->ilist, sizeof(item *) * c->isize * 2);
@@ -3380,6 +3382,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
     }
 }
 
+//set KEY expired_time bytes [noreply]
 static void process_update_command(conn *c, token_t *tokens, const size_t ntokens, int comm, bool handle_cas) {
     char *key;
     size_t nkey;
@@ -3436,6 +3439,7 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
         stats_prefix_record_set(key, nkey);
     }
 
+	//真正的update
     it = item_alloc(key, nkey, flags, realtime(exptime), vlen);
 
     if (it == 0) {
@@ -3845,6 +3849,7 @@ static void process_command(conn *c, char *command) {
 
     MEMCACHED_PROCESS_COMMAND_START(c->sfd, c->rcurr, c->rbytes);
 
+	fprintf(stdout, "<%d %s\n", c->sfd, command);
     if (settings.verbose > 1)
         fprintf(stderr, "<%d %s\n", c->sfd, command);
 
@@ -3861,6 +3866,7 @@ static void process_command(conn *c, char *command) {
         return;
     }
 
+	//符号化收到的字符串
     ntokens = tokenize_command(command, tokens, MAX_TOKENS);
     if (ntokens >= 3 &&
         ((strcmp(tokens[COMMAND_TOKEN].value, "get") == 0) ||
@@ -4216,6 +4222,7 @@ static int try_read_command(conn *c) {
     } else {
         char *el, *cont;
 
+		//再次验证下是否有待处理的数据
         if (c->rbytes == 0)
             return 0;
 
@@ -4243,12 +4250,13 @@ static int try_read_command(conn *c) {
         }
 		//Client端是以'\r\n'结束的
         cont = el + 1;
+		//如果el前面还有字符并且现在前一个字符是\r那么就el--
         if ((el - c->rcurr) > 1 && *(el - 1) == '\r') {
             el--;
         }
         *el = '\0';
 
-		//cont是指向'\n'后面的一个位置的，这里就是保证conn buffer中的数据是不小于cond指向的位置的。
+		//cont是指向'\n'后面的一个位置的，这里就是保证待处理的数据是在缓冲区buffer之内的，没有越界。
         assert(cont <= (c->rcurr + c->rbytes));
 
 		//更新时间
@@ -4566,6 +4574,8 @@ static int read_into_chunked_item(conn *c) {
     return total;
 }
 
+//使用state machine来维护conn的状态，
+//
 static void drive_machine(conn *c) {
     bool stop = false;
     int sfd;
@@ -6371,8 +6381,9 @@ int main (int argc, char **argv) {
 #endif
     }
 
+	//上面的代码都是对一些环境变量以及设置变量进行初始化，从下面开始才是真正的init过程
     /* initialize main thread libevent instance */
-    main_base = event_init();
+    main_base = event_init(); //初始化event_bae
 
     /* initialize other stuff */
     logger_init();
@@ -6388,6 +6399,9 @@ int main (int argc, char **argv) {
      * ignore SIGPIPE signals; we can use errno == EPIPE if we
      * need that information
      */
+	//系统对于SIGPIPE信号的处理是直接终止进程的
+	/* 无论是否忽略SIGPIPE信号 系统都会返回EPIPE错误
+	 */
     if (sigignore(SIGPIPE) == -1) {
         perror("failed to ignore SIGPIPE; sigaction");
         exit(EX_OSERR);

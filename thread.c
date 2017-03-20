@@ -145,6 +145,7 @@ static void wait_for_thread_registration(int nthreads) {
 
 static void register_thread_initialized(void) {
     pthread_mutex_lock(&init_lock);
+	//可能会有多个线程同时来增加init_count 需要进行同步
     init_count++;
     pthread_cond_signal(&init_cond);
     pthread_mutex_unlock(&init_lock);
@@ -389,6 +390,7 @@ static void *worker_libevent(void *arg) {
  * Processes an incoming "handle a new connection" item. This is called when
  * input arrives on the libevent wakeup pipe.
  */
+//当socket如果有字符写入 则表示有fd可读 触发libevent注册的thread_libevent_process函数进行处理
 static void thread_libevent_process(int fd, short which, void *arg) {
     LIBEVENT_THREAD *me = arg;
     CQ_ITEM *item;
